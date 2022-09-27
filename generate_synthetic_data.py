@@ -2,6 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 np.random.seed() 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+#             RUN PARAMETERS             #
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 run_name = "synthetic_data"
 n_atoms = 9 
 n_dims = 3 
@@ -11,6 +16,7 @@ cutoff = 1.0
 cutoff_width = 5e-3
 grid_extent = 1.0
 sig = 5e-3
+##########################################
 
 cell = np.array([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
 
