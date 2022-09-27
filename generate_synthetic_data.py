@@ -16,9 +16,9 @@ cutoff = 1.0
 cutoff_width = 5e-3
 grid_extent = 1.0
 sig = 5e-3
+cell = np.array([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
 ##########################################
 
-cell = np.array([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
 
 def P(x, sig, atoms, neigh_vecs, cutoff):
     p = np.zeros_like(x) + 1e-12
