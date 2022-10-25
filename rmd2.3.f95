@@ -4,16 +4,19 @@ program rmd2
     real(dp), parameter   :: PI = 4.0_dp * atan(1.0_dp)
     integer               :: n_atoms, n_dims, n_grid_points, n_iters, n_neighs,&
                              n_samples, i, j, k
-    real(dp)              :: grid_extent, cutoff, dt, sig, cutoff_width, u, ke, t, uO
+    real(dp)              :: grid_extent, cutoff, dt, sig, cutoff_width, u, ke, t, uO, damping, kbT, n1, n2
     real(dp), allocatable :: cell(:,:), r(:,:), neigh_vecs(:,:),&
                              plane_norms(:,:), inv_proj(:),&
                              x(:), q(:,:), dudr(:,:), p(:), q_mean(:), at(:,:),&
                              vt(:,:), vth(:,:), p_hist(:,:), xO(:), pO(:), duOdr(:,:),&
-                             q_meanO(:)
-
+                             q_meanO(:), zmsgp(:,:)
+    character(len=50)     :: in_filename
+    character(len=100)    :: r_hist_filename, p_hist_filename
+    character(len=10)     :: file_id
         
     call read_input_file(n_atoms, n_dims, n_grid_points,&
-    n_iters, n_samples, grid_extent, cutoff, dt, sig, cutoff_width, cell, r, q)
+    n_iters, n_samples, grid_extent, cutoff, dt, sig, &
+    cutoff_width, damping, kbT, in_filename, cell, r, q)
 
     call calc_x(x, n_grid_points, grid_extent)    
     call calc_x(xO, n_grid_points, PI)    
@@ -34,6 +37,7 @@ program rmd2
     allocate(q_mean(n_grid_points))
     allocate(q_meanO(n_grid_points))
     allocate(p_hist(n_grid_points,n_iters/10))
+    allocate(zmsgp(n_dims, n_atoms))
 
     q_mean = mean(q)
 
@@ -62,13 +66,22 @@ program rmd2
         call calc_ke(ke, vth, n_atoms)
 
         if (modulo(i,10) .eq. 0) then
-            open(unit=1, file="p_hist.dat", status="old", access="sequential",&
+            write(file_id, '(i0)') i
+            p_hist_filename = trim(adjustl(in_filename)) // "/" // "p_hist/" // "p" // trim(adjustl(file_id)) // ".dat"
+            open(unit=1, file=p_hist_filename, status="replace", access="sequential",&
             form="formatted", position="append", action="write")
             write(1, *) p
             close(1)
+
+            r_hist_filename = trim(adjustl(in_filename)) // "/" // "r_hist/" // "r" // trim(adjustl(file_id)) // ".dat"
+            open(unit=1, file=r_hist_filename, status="replace", access="sequential",&
+            form="formatted", position="append", action="write")
+            write(1, *) r
+            close(1)
         end if
 
-        at = -dudr
+        !call gen_normal(zmsgp)
+        at = -dudr! - damping*vth + sqrt(2*damping*kbT/dt)*zmsgp
         vt = vth + 0.5_dp*at*dt
         write(*,*) i, u+ke, u, ke
     end do
@@ -83,6 +96,7 @@ program rmd2
     deallocate(dudr)
     deallocate(q_mean)
     deallocate(p_hist)
+    deallocate(zmsgp)
 
 contains
 
@@ -178,7 +192,8 @@ contains
                             do i=1, n_dims
                                 dpdr(:,i,l) = dpdr(:,i,l) + dr(i)/djl * gauss_basis(:)*&
                                 (2.0_dp*(x(:)-djl)/(sig*sig)*cutoff_func - &
-                                PI/(cutoff_width)*sin(PI/cutoff_width*(djl-cutoff)))
+                                PI/(1.0_dp*cutoff_width)*sin(PI/cutoff_width*&
+                                (djl-cutoff)))
                             end do
                         end if
                         if (present(uO)) then
@@ -468,19 +483,75 @@ contains
         deallocate(neigh_degrees)
     end subroutine calc_neigh_vecs
 
+    subroutine bm_transform(n1, n2)
+        real(dp), intent(inout) :: n1, n2
+        real(dp)                :: s
+        integer                     :: in_circle
+
+        in_circle = 0
+
+        do while (in_circle .eq. 0)
+            call random_number(n1)
+            call random_number(n2)
+            n1 = n1 * 2 - 1
+            n2 = n2 * 2 - 1
+            s = n1*n1 + n2*n2
+            if (s .le. 1 ) then
+                in_circle = 1
+            end if            
+        end do
+        
+        s = sqrt((-2.0_dp*log(s))/s)
+        n1 = n1*s
+        n2 = n2*s
+
+    end subroutine bm_transform
+
+    subroutine gen_normal(normal_array)
+        real(dp), dimension(:,:), intent(inout)  :: normal_array
+        real(dp)                                :: n1, n2
+        integer, dimension(2)                       :: array_shape
+        integer                                     :: is_odd_2, i, j
+
+        array_shape = shape(normal_array)
+        is_odd_2 = modulo(array_shape(2),2)
+
+        if (is_odd_2 .eq. 1) then
+            do i=1, array_shape(1)
+                do j=1, (array_shape(2)-1)/2
+                    call bm_transform(n1, n2)
+                    normal_array(i, (j - 1) * 2 + 1) = n1
+                    normal_array(i, (j - 1) * 2 + 2) = n2
+                end do
+                call bm_transform(n1, n2)
+                normal_array(i, array_shape(2)) = n1
+            end do
+        else
+            do i=1, array_shape(1)
+                do j=1, array_shape(2)/2
+                    call bm_transform(n1, n2)
+                    normal_array(i, (j - 1) * 2 + 1) = n1
+                    normal_array(i, (j - 1) * 2 + 2) = n2
+                end do
+            end do
+        end if
+
+    end subroutine gen_normal
+
     subroutine read_input_file(n_atoms, n_dims, n_grid_points,&
-    n_iters, n_samples, grid_extent, cutoff, dt, sig, cutoff_width, cell, r, q)
+    n_iters, n_samples, grid_extent, cutoff, dt, sig, cutoff_width,&
+    damping, kbT, in_filename, cell, r, q)
         integer, intent(inout)              :: n_atoms, n_dims, n_grid_points, n_iters,&
                                                n_samples
         real(dp), intent(inout)             :: grid_extent, cutoff, dt, sig,&
-                                               cutoff_width
+                                               cutoff_width, damping, kbT
         real(dp), allocatable, intent(inout):: cell(:,:), r(:,:), q(:,:)    
         
-        character(len=50)                   :: in_filename, q_filename
+        character(len=50), intent(out)      :: in_filename
         integer                             :: i    
 
         call get_command_argument(1, in_filename)
-        open(unit=1, file=in_filename, status="old", access="sequential",&
+        open(unit=1, file=trim(adjustl(in_filename))//"/rmd2_infile.dat", status="old", access="sequential",&
         form="formatted", action="read")
 
         read(1, *) n_atoms
@@ -493,6 +564,8 @@ contains
         read(1, *) dt
         read(1, *) sig
         read(1, *) cutoff_width
+        read(1, *) damping
+        read(1, *) kbT
 
         allocate(cell(n_dims, n_dims))
         allocate(r(n_dims, n_atoms))
@@ -507,8 +580,7 @@ contains
 
         close(1)
 
-        call get_command_argument(2, q_filename)
-        open(unit=1, file=q_filename, status="old", access="sequential",&
+        open(unit=1, file=trim(adjustl(in_filename))//"/rmd2_qfile.dat", status="old", access="sequential",&
         form="formatted", action="read")
         
         allocate(q(n_grid_points, n_samples))

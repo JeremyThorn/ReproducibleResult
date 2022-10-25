@@ -14,7 +14,7 @@ n_grid_points = 4000
 n_samples = 2000
 cutoff = 1.0 
 cutoff_width = 5e-3
-grid_extent = 1.0
+grid_extent = 0.85
 sig = 5e-3
 cell = np.array([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
 ##########################################
@@ -70,7 +70,29 @@ def fill_cell_crystal(cell, n_atoms, n_dims):
     atoms = atoms+disp
     return atoms
 
+def gen_init_config(cell, neigh_vecs, n_atoms, n_dims):
+    init_atoms = np.zeros((n_atoms, n_dims))
+    frac_coords = np.random.uniform(size=3)
+    abs_coords = np.einsum("ij,i->j", cell, frac_coords)
+    init_atoms[0,:] = abs_coords
+    searching = True
+    dist_lim = 0.4
+    for i in range(1, n_atoms):
+        searching = True
+        while searching == True:
+            searching = False
+            frac_coords = np.random.uniform(size=3)
+            abs_coords = np.einsum("ij,i->j", cell, frac_coords)
+            for j in range(i):
+                for vec in neigh_vecs:
+                    dist = np.linalg.norm(abs_coords - (vec+init_atoms[j]))
+                    if dist < dist_lim:
+                        searching = True
+        init_atoms[i,:] = abs_coords
+    return init_atoms
+
 neigh_vecs = np.array(get_neighbour_vecs(cell, cutoff, n_atoms, n_dims))
+init_atoms = gen_init_config(cell, neigh_vecs, n_atoms, n_dims)
 x = np.linspace(0.0, grid_extent, n_grid_points)
 
 ps = np.zeros((n_samples, n_grid_points))
@@ -83,6 +105,8 @@ for i in range(n_samples):
 
 try:
     os.mkdir(run_name)
+    os.mkdir(os.path.join(run_name,"p_hist"))
+    os.mkdir(os.path.join(run_name,"r_hist"))
 except:
     pass
 
@@ -99,13 +123,14 @@ with open(os.path.join(run_name, "rmd2_infile.dat"), "w") as infofile:
     infofile.write(str("...\n")) # for dt
     infofile.write(str(sig) + "\n")
     infofile.write(str(cutoff_width) + "\n")
+    infofile.write(str("...\n")) # for damping
+    infofile.write(str("...\n")) # for kbT
     for row in cell:
         rowstr = ""
         for i in row:
             rowstr += f'{i:0.12f}'+ " "
         infofile.write(rowstr + "\n")
-    for i in range(n_atoms):
-        randpos = np.random.uniform(size=3)
+    for randpos in init_atoms:
         rowstr = ""
         for coord in randpos:
             rowstr += f'{coord:0.12f}'+ " "
